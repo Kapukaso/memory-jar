@@ -1,74 +1,34 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { startRecording, stopRecording } from '../utils/recorder';
-import { blobToBase64, compressImage } from '../utils/helpers';
-import { Mic, Image as ImageIcon, Save, X, Loader2, StopCircle, Tag } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Camera, Mic, Save, X, ImageIcon, Loader2, StopCircle, Tag } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { startRecording, stopRecording } from '../utils/recorder';
+import { compressImage } from '../utils/helpers';
+import { uploadFile, uploadAudio } from '../utils/storage';
 
 const MemoryForm = ({ addMemory, currentMemory, updateMemory, setEditingMemory }) => {
-  const [title, setTitle] = useState('');
-  const [text, setText] = useState('');
-  const [image, setImage] = useState('');
-  const [audioBase64, setAudioBase64] = useState(null);
-  const [tags, setTags] = useState('');
+  const [title, setTitle] = useState(currentMemory ? currentMemory.title : '');
+  const [text, setText] = useState(currentMemory ? currentMemory.text : '');
+  const [image, setImage] = useState(currentMemory ? currentMemory.image : '');
+  const [imageFile, setImageFile] = useState(null); // Store raw file for upload
+  const [audioBase64, setAudioBase64] = useState(currentMemory ? currentMemory.audio : null);
+  const [audioBlob, setAudioBlob] = useState(null); // Store raw blob for upload
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [tags, setTags] = useState(currentMemory && currentMemory.tags ? currentMemory.tags.join(', ') : '');
+
   const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    if (currentMemory) {
-      setTitle(currentMemory.title);
-      setText(currentMemory.text);
-      setImage(currentMemory.image || '');
-      setAudioBase64(currentMemory.audio || null);
-      setTags(currentMemory.tags ? currentMemory.tags.join(', ') : '');
-    } else {
-      resetForm();
-    }
-  }, [currentMemory]);
-
-  const resetForm = () => {
-    setTitle('');
-    setText('');
-    setImage('');
-    setAudioBase64(null);
-    setTags('');
-    setIsRecording(false);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!title || !text) return;
-
-    const processedTags = tags.split(',').map(t => t.trim()).filter(t => t.length > 0);
-
-    const newMemory = {
-      id: currentMemory ? currentMemory.id : Date.now(),
-      title,
-      text,
-      date: new Date().toLocaleDateString(),
-      image,
-      audio: audioBase64,
-      tags: processedTags
-    };
-
-    if (currentMemory) {
-      updateMemory(newMemory);
-      setEditingMemory(null);
-    } else {
-      addMemory(newMemory);
-    }
-    resetForm();
-  };
 
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
       setIsProcessing(true);
       try {
+        // Keep local preview
         const compressedBase64 = await compressImage(file);
         setImage(compressedBase64);
+        setImageFile(file); // Store file for cloud upload
       } catch (error) {
-        console.error("Image processing failed", error);
+        console.error("Image processing error:", error);
       } finally {
         setIsProcessing(false);
       }
@@ -96,6 +56,59 @@ const MemoryForm = ({ addMemory, currentMemory, updateMemory, setEditingMemory }
       } catch (error) {
         console.error("Could not start recording", error);
       }
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsProcessing(true);
+
+    try {
+      let imageUrl = image;
+      let audioUrl = audioBase64;
+
+      // Upload Image if new file exists
+      if (imageFile) {
+        imageUrl = await uploadFile(imageFile);
+      }
+
+      // Upload Audio if new blob exists
+      if (audioBlob) {
+        audioUrl = await uploadAudio(audioBlob);
+      }
+
+      const processedTags = tags.split(',').map(t => t.trim()).filter(t => t.length > 0);
+
+      const memoryData = {
+        id: currentMemory ? currentMemory.id : undefined, // ID handled by DB for new
+        title,
+        text,
+        image: imageUrl, // Now a URL
+        audio: audioUrl, // Now a URL
+        date: currentMemory ? currentMemory.date : new Date().toLocaleDateString(),
+        tags: processedTags
+      };
+
+      if (currentMemory) {
+        updateMemory(memoryData);
+        setEditingMemory(null);
+      } else {
+        await addMemory(memoryData);
+      }
+
+      // Reset form
+      setTitle('');
+      setText('');
+      setImage('');
+      setImageFile(null);
+      setAudioBase64(null);
+      setAudioBlob(null);
+      setTags('');
+    } catch (error) {
+      console.error("Error saving memory:", error);
+      alert("Error saving memory: " + error.message);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -167,8 +180,8 @@ const MemoryForm = ({ addMemory, currentMemory, updateMemory, setEditingMemory }
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${image ? 'bg-pastel-gray-green text-slate-700' : 'bg-white/60 text-slate-600 hover:bg-white/80'
-                }`}
+              className={`flex items - center gap - 2 px - 4 py - 2 rounded - full transition - all ${image ? 'bg-pastel-gray-green text-slate-700' : 'bg-white/60 text-slate-600 hover:bg-white/80'
+                } `}
             >
               <ImageIcon size={20} />
               {image ? 'Change Photo' : 'Add Photo'}
@@ -180,12 +193,12 @@ const MemoryForm = ({ addMemory, currentMemory, updateMemory, setEditingMemory }
             type="button"
             onClick={handleRecordToggle}
             disabled={isProcessing}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${isRecording
-                ? 'bg-red-400 text-white animate-pulse'
-                : audioBase64
-                  ? 'bg-pastel-gray-green text-slate-700'
-                  : 'bg-white/60 text-slate-600 hover:bg-white/80'
-              }`}
+            className={`flex items - center gap - 2 px - 4 py - 2 rounded - full transition - all ${isRecording
+              ? 'bg-red-400 text-white animate-pulse'
+              : audioBase64
+                ? 'bg-pastel-gray-green text-slate-700'
+                : 'bg-white/60 text-slate-600 hover:bg-white/80'
+              } `}
           >
             {isProcessing ? <Loader2 className="animate-spin" size={20} /> : isRecording ? <StopCircle size={20} /> : <Mic size={20} />}
             {isRecording ? 'Stop' : audioBase64 ? 'Re-record' : 'Record Voice'}
